@@ -1,7 +1,7 @@
 """
 FinTrust Digital Bank - Model & Prediction Pipeline Module
 =========================================================
-Week 2: ML Engineering Pipeline Component (Part D)
+Week 3: ML Engineering Pipeline Component (Part D)
 
 This module implements the final stages of the FinTrust Digital Bank ML Engineering pipeline:
 Model Training, Prediction Generation, and Output Formatting, orchestrating the full workflow:
@@ -10,17 +10,14 @@ Data -> Validation -> Preprocessing -> Feature Preparation -> [MODEL] -> [PREDIC
 
 IMPORTANT ARCHITECTURAL CONTEXT:
 --------------------------------
-In accordance with the ML Engineering track specification for Week 2:
-1. Proof-of-Concept Baseline: This module trains a simple baseline classifier
-   (e.g., Logistic Regression with balanced class weights) purely for technical pipeline
-   demonstration and verification. It is NOT a production fraud detection model.
-   Production-grade feature selection, hyperparameter tuning, and advanced modeling
-   belong to the Data Science track.
+1. Proof-of-Concept Baseline: This module trains a baseline classifier
+   (Logistic Regression with balanced class weights) purely for technical pipeline
+   demonstration, interface validation, and end-to-end verification.
+   Production-grade model development and hyperparameter tuning belong to the Data Science track.
 2. Synthetic Target: The target field 'Risk_Review_Flag' is an educational synthetic
    label ('Yes' / 'No'), not a real banking fraud determination.
-3. End-to-End Orchestration: The pipeline ensures reproducible data flow from raw files,
-   through validation gating, relational preprocessing, model training/loading, and
-   structured output generation.
+3. Modular Model Interface: Uses ModelInterface to decouple prediction logic from specific
+   model architectures, enabling plug-and-play integration for future Data Science models.
 """
 
 from __future__ import annotations
@@ -29,20 +26,18 @@ import datetime
 import logging
 import os
 import sys
-from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-# Ensure project root is on sys.path for direct script execution
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Ensure project root is on sys.path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 import joblib
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -52,22 +47,46 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
-# Internal pipeline dependencies
-from src.preprocessing import (
-    ID_COLUMNS,
-    TARGET_COLUMN,
-    DataPreprocessor,
-    preprocess_pipeline,
-)
+# Centralized configuration imports
+try:
+    from src.config import (
+        DEFAULT_MODEL_ARTIFACT_PATH,
+        DEFAULT_MODEL_VERSION,
+        ID_COLUMNS,
+        MODEL_DIR,
+        MODELLING_DATA_PATH,
+        PREDICTIONS_OUTPUT_PATH,
+        PREPROCESSOR_ARTIFACT_PATH,
+        RANDOM_STATE,
+        RAW_DATA_DIR,
+        TARGET_COLUMN,
+        TEST_SPLIT_RATIO,
+    )
+except ImportError:
+    DEFAULT_MODEL_VERSION = "baseline_v1"
+    MODEL_DIR = Path("models")
+    DEFAULT_MODEL_ARTIFACT_PATH = MODEL_DIR / f"{DEFAULT_MODEL_VERSION}.joblib"
+    PREPROCESSOR_ARTIFACT_PATH = MODEL_DIR / "preprocessor.joblib"
+    RAW_DATA_DIR = Path("data/raw")
+    MODELLING_DATA_PATH = Path("data/processed/FinTrust_Modelling_Ready.csv")
+    PREDICTIONS_OUTPUT_PATH = Path("data/processed/FinTrust_Predictions.csv")
+    ID_COLUMNS = ["Transaction_ID", "Customer_ID"]
+    TARGET_COLUMN = "Risk_Review_Flag"
+    RANDOM_STATE = 42
+    TEST_SPLIT_RATIO = 0.20
+
+from src.model_loader import ModelInterface, load_model, validate_model_interface
+from src.preprocessing import DataPreprocessor, preprocess_pipeline
 from src.validation import validate_fintrust_pipeline
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL_VERSION = "baseline_v1"
-DEFAULT_MODEL_DIR = "models"
+DEFAULT_MODEL_DIR = str(MODEL_DIR)
 DEFAULT_PROCESSED_DIR = "data/processed"
-DEFAULT_RAW_DIR = "data/raw"
+DEFAULT_RAW_DIR = str(RAW_DATA_DIR)
 
 
 # =====================================================================
@@ -78,24 +97,22 @@ def train_baseline_model(
     model_ready_df: pd.DataFrame,
     target_col: str = TARGET_COLUMN,
     model_version: str = DEFAULT_MODEL_VERSION,
-    test_size: float = 0.20,
-    random_state: int = 42,
+    test_size: float = TEST_SPLIT_RATIO,
+    random_state: int = RANDOM_STATE,
     save_dir: Optional[str] = DEFAULT_MODEL_DIR,
+    preprocessor: Optional[DataPreprocessor] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, float]]:
     """
     Train a baseline classifier for technical pipeline verification.
 
-    NOTE: This model serves as a proof-of-concept pipeline baseline to verify that data
-    flows cleanly from features to predictions and serialized artifacts. Deep iterative
-    modeling and feature optimization are the domain of the Data Science track.
-
     Args:
         model_ready_df: Preprocessed DataFrame containing features and target column.
-        target_col: Name of the binary target column (1/0 or 'Yes'/'No'). Defaults to 'Risk_Review_Flag'.
+        target_col: Name of the binary target column. Defaults to 'Risk_Review_Flag'.
         model_version: Version identifier string for artifact tracking.
-        test_size: Ratio of the dataset allocated for test evaluation (default 0.20 = 20%).
+        test_size: Ratio of the dataset allocated for test evaluation (default 0.20).
         random_state: Random seed for reproducibility.
         save_dir: Optional directory where the trained artifact bundle will be saved.
+        preprocessor: Optional fitted DataPreprocessor to persist alongside model.
 
     Returns:
         Tuple of (model_artifact_bundle, sanity_metrics_dict).
@@ -116,7 +133,6 @@ def train_baseline_model(
         y = y.map({"Yes": 1, "No": 0})
 
     # 2. Stratified Train/Test Split
-    # Stratification is critical due to the known ~80/20 class imbalance in Risk_Review_Flag
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -130,8 +146,6 @@ def train_baseline_model(
     )
 
     # 3. Fit Simple Baseline Pipeline (StandardScaler + LogisticRegression with class_weight='balanced')
-    # Logistic Regression is used here as a clean, transparent baseline classifier.
-    # StandardScaler handles numerical scaling (e.g. Amount_NGN vs binary one-hot features) cleanly.
     model = Pipeline(
         [
             ("scaler", StandardScaler()),
@@ -182,29 +196,36 @@ def train_baseline_model(
         joblib.dump(artifact_bundle, artifact_path)
         logger.info(f"Model artifact bundle successfully saved to {artifact_path}")
 
+        # If preprocessor provided, persist preprocessor artifact alongside
+        if preprocessor is not None and preprocessor.is_fitted:
+            prep_path = os.path.join(save_dir, "preprocessor.joblib")
+            preprocessor.save(prep_path)
+
     return artifact_bundle, sanity_metrics
 
 
 def load_model_artifact(artifact_path: str) -> Dict[str, Any]:
     """
-    Load a saved model artifact bundle from disk.
+    Load a saved model artifact bundle from disk, validating interface compliance.
 
     Args:
         artifact_path: Path to the .joblib artifact file.
 
     Returns:
-        The deserialized model artifact dictionary.
+        The validated model artifact dictionary.
     """
     if not os.path.exists(artifact_path):
         raise FileNotFoundError(f"Model artifact not found at: {artifact_path}")
     artifact = joblib.load(artifact_path)
-    logger.info(f"Loaded model artifact from {artifact_path}")
+    validate_model_interface(artifact)
+    logger.info(f"Loaded and validated model artifact from {artifact_path}")
     return artifact
 
 
 def _print_sanity_check_report(metrics: Dict[str, float], model_version: str) -> None:
     """Print a clean diagnostic summary of the baseline model sanity check."""
     sep = "-" * 65
+    logger.info(f"Baseline Sanity Check (Model: {model_version}): {metrics}")
     print("\n" + sep)
     print(f"PIPELINE SANITY CHECK METRICS (Model: {model_version})")
     print("NOTE: Technical baseline for pipeline verification only (not production DS model).")
@@ -222,7 +243,7 @@ def _print_sanity_check_report(metrics: Dict[str, float], model_version: str) ->
 # =====================================================================
 
 def predict(
-    model_or_artifact: Union[Dict[str, Any], Any],
+    model_or_artifact: Union[Dict[str, Any], ModelInterface, Any],
     features_df: pd.DataFrame,
     threshold: float = 0.5,
 ) -> pd.DataFrame:
@@ -230,14 +251,13 @@ def predict(
     Generate predictions and risk probabilities for prepared feature records.
 
     Supports both batch prediction (full DataFrame) and single-record inference
-    (1-row DataFrame, simulating an API or service endpoint).
+    (1-row DataFrame). Uses ModelInterface for strict feature order alignment.
 
     Args:
-        model_or_artifact: Either a fitted scikit-learn model or an artifact bundle
-            dictionary containing 'model' and 'feature_names'.
-        features_df: Prepared features DataFrame. Extra columns (e.g. Transaction_ID,
-            Customer_ID, Risk_Review_Flag) are automatically ignored.
-        threshold: Decision threshold for the positive class ('Yes'). Defaults to 0.5.
+        model_or_artifact: Either a fitted ModelInterface, scikit-learn model,
+            or an artifact bundle dictionary containing 'model' and 'feature_names'.
+        features_df: Prepared features DataFrame.
+        threshold: Decision threshold for positive class ('Yes'). Defaults to 0.5.
 
     Returns:
         DataFrame containing:
@@ -245,48 +265,31 @@ def predict(
           - 'prediction_confidence': float probability (0.0 to 1.0)
           - 'predicted_class': integer (1 or 0)
     """
-    # 1. Unpack model and required feature columns
-    if isinstance(model_or_artifact, dict) and "model" in model_or_artifact:
-        model = model_or_artifact["model"]
-        feature_cols = model_or_artifact.get("feature_names")
+    if isinstance(model_or_artifact, ModelInterface):
+        interface = model_or_artifact
+    elif isinstance(model_or_artifact, dict) and "model" in model_or_artifact:
+        interface = ModelInterface(model_or_artifact)
     else:
-        model = model_or_artifact
-        feature_cols = None
+        # Fallback for bare estimators
+        pseudo_bundle = {
+            "model": model_or_artifact,
+            "feature_names": [
+                c for c in features_df.columns if c not in ID_COLUMNS and c != TARGET_COLUMN
+            ],
+            "model_version": "bare_estimator",
+        }
+        interface = ModelInterface(pseudo_bundle)
 
-    if feature_cols:
-        # Verify feature presence and alignment
-        missing_features = [col for col in feature_cols if col not in features_df.columns]
-        if missing_features:
-            raise ValueError(
-                f"Missing {len(missing_features)} required feature columns for prediction: "
-                f"{missing_features[:5]}"
-            )
-        X = features_df[feature_cols].copy()
-    else:
-        # Fallback: drop ID columns and target if present
-        cols_to_drop = [col for col in ID_COLUMNS + [TARGET_COLUMN] if col in features_df.columns]
-        X = features_df.drop(columns=cols_to_drop)
-
-    # 2. Compute Probabilities & Decisions
-    if hasattr(model, "predict_proba"):
-        probabilities = model.predict_proba(X)[:, 1]
-    else:
-        # Fallback for models without predict_proba
-        raw_preds = model.predict(X)
-        probabilities = np.where(raw_preds == 1, 1.0, 0.0)
-
-    decisions = ["Yes" if p >= threshold else "No" for p in probabilities]
-    predicted_classes = [1 if p >= threshold else 0 for p in probabilities]
+    binary_classes, confidences, decisions = interface.predict(features_df, threshold=threshold)
 
     result = pd.DataFrame(
         {
             "prediction_decision": decisions,
-            "prediction_confidence": np.round(probabilities, 4),
-            "predicted_class": predicted_classes,
+            "prediction_confidence": confidences,
+            "predicted_class": binary_classes,
         },
         index=features_df.index,
     )
-
     return result
 
 
@@ -340,9 +343,7 @@ def format_and_save_predictions(
     if output_path:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         output_df.to_csv(output_path, index=False)
-        logger.info(
-            f"Saved {len(output_df):,} formatted predictions to {output_path}"
-        )
+        logger.info(f"Saved {len(output_df):,} formatted predictions to {output_path}")
 
     return output_df
 
@@ -359,29 +360,12 @@ def run_pipeline(
     retrain_model: bool = True,
 ) -> Dict[str, Any]:
     """
-    Execute the full FinTrust Digital Bank ML Engineering pipeline end-to-end:
-
-    Stage 1: Data Ingestion (Load raw CSVs)
-    Stage 2: Validation (Enforce schemas, null thresholds, and referential integrity)
-    Stage 3: Preprocessing & Feature Preparation (Join, impute, temporal feature engineering, encoding)
-    Stage 4: Model Training / Loading (Train baseline classifier or load existing artifact)
-    Stage 5: Prediction (Generate decisions and confidence scores)
-    Stage 6: Output Formatting (Save structured predictions to CSV)
-
-    Args:
-        raw_data_dir: Path to raw datasets directory.
-        processed_dir: Path to directory where processed CSVs will be saved.
-        model_dir: Path to directory for serialized model artifacts.
-        model_version: Model version tag to use for training or loading.
-        retrain_model: Whether to train a new model artifact (True) or load existing (False).
-
-    Returns:
-        Dictionary containing pipeline execution status, reports, and summary statistics.
+    Execute the full FinTrust Digital Bank ML Engineering pipeline end-to-end.
     """
     pipeline_start = datetime.datetime.now()
     sep = "=" * 70
     print("\n" + sep)
-    print("FINTRUST DIGITAL BANK - ML ENGINEERING PIPELINE RUNNER (WEEK 2)")
+    print("FINTRUST DIGITAL BANK - ML ENGINEERING PIPELINE RUNNER (WEEK 3)")
     print("Flow: Data -> Validation -> Preprocessing -> Features -> Model -> Prediction -> Output")
     print(sep + "\n")
 
@@ -409,7 +393,6 @@ def run_pipeline(
     print("\n>>> [STAGE 2/6] Executing Data Validation Gating...")
     validation_reports = validate_fintrust_pipeline(customer_df, transaction_df, raise_on_error=False)
 
-    # Check for blocking errors
     has_blocking_errors = False
     for stage_name, report in validation_reports.items():
         status = "PASSED" if report.is_valid else "FAILED"
@@ -433,18 +416,16 @@ def run_pipeline(
     # -------------------------------------------------------------
     print("\n>>> [STAGE 3/6] Running Preprocessing & Feature Preparation...")
     modelling_csv_path = os.path.join(processed_dir, "FinTrust_Modelling_Ready.csv")
+    preprocessor_path = os.path.join(model_dir, "preprocessor.joblib")
     model_ready_df, preprocessor = preprocess_pipeline(
-        customer_df, transaction_df, output_path=modelling_csv_path
+        customer_df,
+        transaction_df,
+        output_path=modelling_csv_path,
+        save_preprocessor_path=preprocessor_path,
     )
     print(f"    Feature Preparation Complete: {model_ready_df.shape[0]:,} rows x {model_ready_df.shape[1]} features.")
     print(f"    Model-ready dataset saved to: {modelling_csv_path}")
-    if "Is_Local_Transaction" in model_ready_df.columns:
-        non_local_count = int((model_ready_df["Is_Local_Transaction"] == False).sum())
-        non_local_pct = (non_local_count / len(model_ready_df)) * 100.0
-        print(
-            f"    Feature Sanity Check: {non_local_count:,} / {len(model_ready_df):,} rows "
-            f"({non_local_pct:.1f}%) have Is_Local_Transaction = False (out-of-town transactions)."
-        )
+    print(f"    Preprocessor artifact saved to: {preprocessor_path}")
 
     # -------------------------------------------------------------
     # STAGE 4: MODEL TRAINING / LOADING
@@ -456,6 +437,7 @@ def run_pipeline(
             model_ready_df,
             model_version=model_version,
             save_dir=model_dir,
+            preprocessor=preprocessor,
         )
     else:
         print(f"\n>>> [STAGE 4/6] Loading Existing Model Artifact ('{model_version}')...")
@@ -498,6 +480,7 @@ def run_pipeline(
     print(f"  - Risk Flagged 'No'  : {no_count:,} ({no_count/len(final_output_df)*100:.1f}%)")
     print(f"  - Model Version      : {model_version}")
     print(f"  - Model Artifact     : {artifact_path}")
+    print(f"  - Preprocessor       : {preprocessor_path}")
     print(f"  - Output File        : {predictions_output_path}")
     print(sep + "\n")
 
@@ -509,18 +492,14 @@ def run_pipeline(
         "sanity_metrics": sanity_metrics,
         "output_path": predictions_output_path,
         "model_path": artifact_path,
+        "preprocessor_path": preprocessor_path,
         "execution_time_sec": elapsed,
     }
 
-
-# =====================================================================
-# Standalone CLI Entry Point
-# =====================================================================
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
-    # Run end-to-end pipeline
     run_pipeline()

@@ -1,7 +1,7 @@
 """
 FinTrust Digital Bank - Data Preprocessing Module
 ================================================
-Week 2: ML Engineering Pipeline Component (Part C)
+Week 3: ML Engineering Pipeline Component (Part C)
 
 This module implements the Preprocessing and Feature Preparation workflow for the
 FinTrust Digital Bank ML Engineering pipeline.
@@ -13,63 +13,78 @@ Responsibilities:
 1. Relational join: Merge Transaction_Data with Customer_Data on Customer_ID.
 2. Missing-value handling: Impute known missing values (Device_Type and Location).
 3. Feature engineering: Extract temporal features from Transaction_DateTime
-   (Transaction_Hour, Transaction_DayOfWeek, Is_Weekend).
+   (Transaction_Hour, Transaction_DayOfWeek, Is_Weekend) and derived location match
+   (Is_Local_Transaction as binary integer 0/1).
 4. Feature encoding: Encode categorical variables using OneHotEncoder with
    handle_unknown='ignore' for robust single-record and batch inference.
 5. Target encoding: Map Risk_Review_Flag ('Yes' -> 1, 'No' -> 0).
-6. Export: Save model-ready dataset to data/processed/FinTrust_Modelling_Ready.csv.
+6. Preprocessor serialization: Persist and restore fitted preprocessor state
+   to enable reproducible real-time and API inference without refitting.
+7. Export: Save model-ready dataset to data/processed/FinTrust_Modelling_Ready.csv.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import OneHotEncoder
 
+# Centralized configuration imports with local fallback definitions
+try:
+    from src.config import (
+        CATEGORICAL_FEATURES,
+        ID_COLUMNS,
+        MODELLING_DATA_PATH,
+        NUMERICAL_FEATURES,
+        PREPROCESSOR_ARTIFACT_PATH,
+        TARGET_COLUMN,
+    )
+except ImportError:
+    CATEGORICAL_FEATURES = [
+        "Transaction_Type",
+        "Channel",
+        "Device_Type",
+        "Location",
+        "International_Transaction",
+        "Transaction_Status",
+        "Gender",
+        "City",
+        "Customer_Segment",
+        "Account_Type",
+        "Monthly_Income_Band",
+        "Preferred_Channel",
+        "Account_Status",
+    ]
+    NUMERICAL_FEATURES = [
+        "Amount_NGN",
+        "Age",
+        "Tenure_Months",
+        "Digital_Engagement_Score",
+        "Transaction_Hour",
+        "Transaction_DayOfWeek",
+        "Is_Weekend",
+        "Is_Local_Transaction",
+    ]
+    TARGET_COLUMN = "Risk_Review_Flag"
+    ID_COLUMNS = ["Transaction_ID", "Customer_ID"]
+    MODELLING_DATA_PATH = Path("data/processed/FinTrust_Modelling_Ready.csv")
+    PREPROCESSOR_ARTIFACT_PATH = Path("models/preprocessor.joblib")
+
 logger = logging.getLogger(__name__)
-
-# Categorical and numerical columns used for feature preparation
-CATEGORICAL_FEATURES = [
-    "Transaction_Type",
-    "Channel",
-    "Device_Type",
-    "Location",
-    "International_Transaction",
-    "Transaction_Status",
-    "Gender",
-    "City",
-    "Customer_Segment",
-    "Account_Type",
-    "Monthly_Income_Band",
-    "Preferred_Channel",
-    "Account_Status",
-]
-
-NUMERICAL_FEATURES = [
-    "Amount_NGN",
-    "Age",
-    "Tenure_Months",
-    "Digital_Engagement_Score",
-    "Transaction_Hour",
-    "Transaction_DayOfWeek",
-    "Is_Weekend",
-    "Is_Local_Transaction",
-]
-
-TARGET_COLUMN = "Risk_Review_Flag"
-ID_COLUMNS = ["Transaction_ID", "Customer_ID"]
 
 
 class DataPreprocessor:
     """
     Stateful preprocessor for FinTrust transaction and customer data.
 
-    Fits encoding transformations on training data and applies consistent
-    transformations during batch or single-record inference.
+    Fits encoding transformations on training data, serializes state to disk,
+    and applies consistent transformations during batch or single-record inference.
     """
 
     def __init__(self):
@@ -120,7 +135,7 @@ class DataPreprocessor:
         self, customer_df: pd.DataFrame, transaction_df: pd.DataFrame
     ) -> pd.DataFrame:
         """
-        Merge customer and transaction tables and apply basic cleaning.
+        Merge customer and transaction tables and apply cleaning and feature extraction.
 
         Args:
             customer_df: FinTrust customer DataFrame.
@@ -143,9 +158,11 @@ class DataPreprocessor:
         # This suggests the feature may not carry genuine behavioural signal in this particular synthetic dataset,
         # and its predictive value should be validated empirically by the Data Science track rather than assumed.
         if "Location" in merged_df.columns and "City" in merged_df.columns:
-            merged_df["Is_Local_Transaction"] = (merged_df["Location"] == merged_df["City"])
+            merged_df["Is_Local_Transaction"] = (
+                merged_df["Location"] == merged_df["City"]
+            ).astype(int)
         else:
-            merged_df["Is_Local_Transaction"] = True
+            merged_df["Is_Local_Transaction"] = 1
 
         # Impute missing values
         merged_df = self._impute_missing_values(merged_df)
@@ -229,7 +246,6 @@ class DataPreprocessor:
         # 5. Attach target if requested and present
         if include_target and TARGET_COLUMN in merged_df.columns:
             target_series = merged_df[TARGET_COLUMN].dropna()
-            # Map 'Yes' -> 1, 'No' -> 0
             result_df[TARGET_COLUMN] = merged_df[TARGET_COLUMN].map(
                 {"Yes": 1, "No": 0, 1: 1, 0: 0}
             )
@@ -246,6 +262,44 @@ class DataPreprocessor:
         self.fit(customer_df, transaction_df)
         return self.transform(customer_df, transaction_df, include_target=include_target)
 
+    def save(self, file_path: Union[str, Path]) -> None:
+        """
+        Serialize fitted preprocessor state using joblib.
+
+        Args:
+            file_path: Destination file path for serialization (.joblib).
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Cannot save an unfitted DataPreprocessor.")
+        dest_path = Path(file_path)
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(self, str(dest_path))
+        logger.info(f"Fitted DataPreprocessor serialized successfully to {dest_path}")
+
+    @classmethod
+    def load(cls, file_path: Union[str, Path]) -> DataPreprocessor:
+        """
+        Deserialize a fitted DataPreprocessor from disk.
+
+        Args:
+            file_path: Path to serialized .joblib preprocessor artifact.
+
+        Returns:
+            Fitted DataPreprocessor instance.
+        """
+        src_path = Path(file_path)
+        if not src_path.exists():
+            raise FileNotFoundError(f"Preprocessor artifact not found at: {src_path}")
+        preprocessor = joblib.load(str(src_path))
+        if not isinstance(preprocessor, cls):
+            raise TypeError(
+                f"Loaded artifact is type {type(preprocessor)}, expected {cls.__name__}."
+            )
+        if not preprocessor.is_fitted:
+            raise ValueError("Loaded DataPreprocessor artifact is not fitted.")
+        logger.info(f"Loaded fitted DataPreprocessor from {src_path}")
+        return preprocessor
+
 
 # =====================================================================
 # Functional Pipeline Runner
@@ -254,15 +308,17 @@ class DataPreprocessor:
 def preprocess_pipeline(
     customer_df: pd.DataFrame,
     transaction_df: pd.DataFrame,
-    output_path: Optional[str] = "data/processed/FinTrust_Modelling_Ready.csv",
+    output_path: Optional[Union[str, Path]] = "data/processed/FinTrust_Modelling_Ready.csv",
+    save_preprocessor_path: Optional[Union[str, Path]] = "models/preprocessor.joblib",
 ) -> Tuple[pd.DataFrame, DataPreprocessor]:
     """
-    Execute full preprocessing pipeline and save modeling-ready dataset.
+    Execute full preprocessing pipeline, save modeling-ready dataset, and serialize preprocessor.
 
     Args:
         customer_df: Customer DataFrame.
         transaction_df: Transaction DataFrame.
         output_path: Optional file path to save the modeling-ready CSV.
+        save_preprocessor_path: Optional file path to serialize the fitted DataPreprocessor.
 
     Returns:
         Tuple of (model_ready_df, fitted_preprocessor).
@@ -271,20 +327,29 @@ def preprocess_pipeline(
     model_ready_df = preprocessor.fit_transform(customer_df, transaction_df)
 
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        model_ready_df.to_csv(output_path, index=False)
+        out_p = Path(output_path)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        model_ready_df.to_csv(str(out_p), index=False)
         logger.info(
             f"Saved modeling-ready dataset ({model_ready_df.shape[0]} rows, "
-            f"{model_ready_df.shape[1]} columns) to {output_path}"
+            f"{model_ready_df.shape[1]} columns) to {out_p}"
         )
+
+    if save_preprocessor_path:
+        try:
+            preprocessor.save(save_preprocessor_path)
+        except Exception as e:
+            logger.warning(f"Could not persist preprocessor to {save_preprocessor_path}: {e}")
 
     # Sanity check log on Is_Local_Transaction
     if "Is_Local_Transaction" in model_ready_df.columns:
-        non_local_cnt = int((model_ready_df["Is_Local_Transaction"] == False).sum())
-        non_local_pct = (non_local_cnt / len(model_ready_df)) * 100.0 if len(model_ready_df) > 0 else 0.0
+        non_local_cnt = int((model_ready_df["Is_Local_Transaction"] == 0).sum())
+        non_local_pct = (
+            (non_local_cnt / len(model_ready_df)) * 100.0 if len(model_ready_df) > 0 else 0.0
+        )
         logger.info(
             f"Sanity Check: {non_local_cnt:,} / {len(model_ready_df):,} rows ({non_local_pct:.1f}%) "
-            f"have Is_Local_Transaction = False (out-of-town transactions)."
+            f"have Is_Local_Transaction = 0 (out-of-town transactions)."
         )
 
     return model_ready_df, preprocessor
@@ -309,13 +374,13 @@ if __name__ == "__main__":
 
     print(f"Running preprocessing on {len(t_df):,} transactions and {len(c_df):,} customers...")
     processed_df, _ = preprocess_pipeline(c_df, t_df)
-    print(f"Preprocessing completed successfully!")
+    print("Preprocessing completed successfully!")
     print(f"Modelling dataset shape: {processed_df.shape}")
     print(f"Target distribution:\n{processed_df[TARGET_COLUMN].value_counts(normalize=True)}")
     if "Is_Local_Transaction" in processed_df.columns:
-        non_local_count = int((processed_df["Is_Local_Transaction"] == False).sum())
+        non_local_count = int((processed_df["Is_Local_Transaction"] == 0).sum())
         non_local_pct = (non_local_count / len(processed_df)) * 100.0
         print(
             f"Is_Local_Transaction check: {non_local_count:,} / {len(processed_df):,} rows "
-            f"({non_local_pct:.1f}%) have Is_Local_Transaction = False."
+            f"({non_local_pct:.1f}%) have Is_Local_Transaction = 0."
         )
