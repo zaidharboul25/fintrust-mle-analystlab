@@ -119,6 +119,25 @@ class HealthResponse(BaseModel):
     timestamp: str
 
 
+class RootResponse(BaseModel):
+    """Root endpoint service overview and navigation schema."""
+    service: str = "FinTrust Financial Intelligence & Digital Banking Support Solution"
+    track: str = "Machine Learning Engineering"
+    milestone: str = "Week 4 — Test, Refine & Present"
+    version: str = "1.0.0"
+    endpoints: Dict[str, str] = {
+        "health": "/health",
+        "predict": "/predict",
+        "documentation": "/docs",
+        "openapi_schema": "/openapi.json",
+    }
+    responsible_use_notice: str = (
+        "FinTrust is a fictional organisation and Risk_Review_Flag is a synthetic educational target, "
+        "NOT an authentic fraud determination. Predictions must not be used for real financial-crime decisions."
+    )
+
+
+
 # =====================================================================
 # Global Service State & Lifespan Management
 # =====================================================================
@@ -205,6 +224,12 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # =====================================================================
 # API Endpoints
 # =====================================================================
+
+@app.get("/", response_model=RootResponse, summary="Root Service Information")
+async def root() -> RootResponse:
+    """Return basic project and service information, available endpoints, and responsible use notice."""
+    return RootResponse()
+
 
 @app.get("/health", response_model=HealthResponse, summary="Service Health Check")
 async def health_check() -> HealthResponse:

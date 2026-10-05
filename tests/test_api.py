@@ -57,6 +57,20 @@ def valid_request_payload():
     }
 
 
+def test_root_endpoint(client):
+    """GET / must return 200, service metadata, endpoints map, and responsible use notice."""
+    response = client.get("/")
+    assert response.status_code == 200
+    data = response.json()
+    assert "FinTrust" in data["service"]
+    assert data["track"] == "Machine Learning Engineering"
+    assert "endpoints" in data
+    assert data["endpoints"]["health"] == "/health"
+    assert data["endpoints"]["predict"] == "/predict"
+    assert "responsible_use_notice" in data
+    assert "synthetic educational target" in data["responsible_use_notice"]
+
+
 def test_health_endpoint(client):
     """GET /health must return 200, healthy status, and model metadata."""
     response = client.get("/health")
