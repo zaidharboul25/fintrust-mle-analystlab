@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Python cache and byte-code
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tests & Notebooks & Docs (not needed in production image)
+notebooks/
+docs/
+*.md
+
+# Intermediate data
+data/processed/
