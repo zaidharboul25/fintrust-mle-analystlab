@@ -38,8 +38,9 @@ DEFAULT_MODEL_VERSION = "baseline_v1"
 DEFAULT_MODEL_ARTIFACT_PATH = MODEL_DIR / f"{DEFAULT_MODEL_VERSION}.joblib"
 PREPROCESSOR_ARTIFACT_PATH = MODEL_DIR / "preprocessor.joblib"
 
-# Documentation
+# Documentation & Static Assets
 DOCS_DIR = PROJECT_ROOT / "docs"
+STATIC_DIR = PROJECT_ROOT / "src" / "static"
 
 # =====================================================================
 # Feature & Target Schema Definitions

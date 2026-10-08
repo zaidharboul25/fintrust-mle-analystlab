@@ -189,3 +189,25 @@ def test_service_unavailable_when_model_missing(client):
         assert "unavailable" in res.json()["detail"].lower()
     finally:
         state.model = original_model
+
+
+def test_ui_dashboard_endpoint(client):
+    """GET /ui and GET /dashboard must return 200 with HTML content."""
+    res_ui = client.get("/ui")
+    assert res_ui.status_code == 200
+    assert "text/html" in res_ui.headers["content-type"]
+    assert "FinTrust" in res_ui.text
+
+    res_dash = client.get("/dashboard")
+    assert res_dash.status_code == 200
+    assert "text/html" in res_dash.headers["content-type"]
+
+
+def test_static_assets_serving(client):
+    """GET /static/style.css and /static/app.js must return valid assets."""
+    res_css = client.get("/static/style.css")
+    assert res_css.status_code == 200
+    assert "css" in res_css.headers["content-type"]
+
+    res_js = client.get("/static/app.js")
+    assert res_js.status_code == 200

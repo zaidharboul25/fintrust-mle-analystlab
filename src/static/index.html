@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinTrust Digital Bank — AI Risk Scoring Dashboard</title>
+    <meta name="description" content="Interface d'évaluation des risques de transaction bancaire en temps réel propulsée par le modèle ML FinTrust.">
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Ambient Background Glows -->
+    <div class="glow-sphere glow-1"></div>
+    <div class="glow-sphere glow-2"></div>
+    <div class="glow-sphere glow-3"></div>
+
+    <div class="app-container">
+        <!-- Top Navigation Bar -->
+        <header class="app-header">
+            <div class="brand-section">
+                <div class="brand-logo">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        <path d="M9 12l2 2 4-4"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="brand-title">FinTrust <span class="gradient-text">AI Guard</span></h1>
+                    <p class="brand-subtitle">Real-Time ML Transaction Risk Scoring & Surveillance</p>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <div id="systemHealthBadge" class="health-pill loading">
+                    <span class="status-dot"></span>
+                    <span id="healthText">Connexion API...</span>
+                </div>
+                <a href="/docs" target="_blank" class="nav-link-btn" title="Documentation Swagger OpenAPI">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                        <polyline points="10 9 9 9 8 9"></polyline>
+                    </svg>
+                    Swagger API
+                </a>
+            </div>
+        </header>
+
+        <!-- Educational Notice Banner -->
+        <div class="notice-banner">
+            <div class="notice-icon">ℹ️</div>
+            <div class="notice-text">
+                <strong>FinTrust Digital Bank (Prototype Éducatif)</strong> — Modèle <code>baseline_v1</code> connecté sur 68 variables avec seuil calibré à 50%.
+            </div>
+            <button class="notice-close" onclick="this.parentElement.style.display='none'">✕</button>
+        </div>
+
+        <!-- Preset Quick Actions -->
+        <section class="presets-section">
+            <span class="presets-label">Scénarios Rapides :</span>
+            <div class="presets-buttons">
+                <button type="button" class="preset-btn safe-preset" id="presetSafeBtn">
+                    <span class="btn-indicator green"></span>
+                    Transaction Normale (Faible Risque)
+                </button>
+                <button type="button" class="preset-btn alert-preset" id="presetRiskBtn">
+                    <span class="btn-indicator red"></span>
+                    Transfert Suspect (Risque Élevé)
+                </button>
+                <button type="button" class="preset-btn warn-preset" id="presetNewCustomerBtn">
+                    <span class="btn-indicator yellow"></span>
+                    Nouveau Client International
+                </button>
+                <button type="button" class="preset-btn reset-preset" id="resetFormBtn">
+                    🔄 Réinitialiser
+                </button>
+            </div>
+        </section>
+
+        <!-- Main Workspace: Form & Prediction Display -->
+        <main class="main-grid">
+            <!-- Left: Transaction Input Form -->
+            <section class="panel form-panel">
+                <div class="panel-header">
+                    <div class="panel-title-wrapper">
+                        <div class="panel-icon form-icon">📝</div>
+                        <h2>Données de la Transaction</h2>
+                    </div>
+                    <span class="badge badge-subtle">Payload POST /predict</span>
+                </div>
+
+                <form id="predictionForm" autocomplete="off">
+                    <!-- Section: Transaction Details -->
+                    <div class="form-group-card">
+                        <h3 class="card-subtitle">1. Paramètres de Transaction</h3>
+                        <div class="input-grid">
+                            <div class="form-field">
+                                <label for="txId">ID Transaction <span class="req">*</span></label>
+                                <input type="text" id="txId" name="Transaction_ID" value="FT-T009841" required pattern="^FT-T\d{6}$" placeholder="FT-T######">
+                            </div>
+
+                            <div class="form-field">
+                                <label for="customerId">ID Client <span class="req">*</span></label>
+                                <input type="text" id="customerId" name="Customer_ID" value="FT-C00124" required pattern="^FT-C\d{5}$" placeholder="FT-C#####">
+                            </div>
+
+                            <div class="form-field full-width">
+                                <label for="amount">Montant (NGN ₦) <span class="req">*</span></label>
+                                <div class="input-with-adornment">
+                                    <span class="adornment">₦</span>
+                                    <input type="number" id="amount" name="Amount_NGN" min="1" step="0.01" value="45000.00" required placeholder="Ex: 50000">
+                                </div>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="txType">Type de Transaction</label>
+                                <select id="txType" name="Transaction_Type">
+                                    <option value="Transfer" selected>Transfert (Transfer)</option>
+                                    <option value="Withdrawal">Retrait (Withdrawal)</option>
+                                    <option value="Payment">Paiement (Payment)</option>
+                                    <option value="Deposit">Dépôt (Deposit)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="channel">Canal d'accès</label>
+                                <select id="channel" name="Channel">
+                                    <option value="Mobile App" selected>Application Mobile</option>
+                                    <option value="Web">Portail Web</option>
+                                    <option value="POS">Terminal POS</option>
+                                    <option value="ATM">Distributeur ATM</option>
+                                    <option value="USSD">Code USSD</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="location">Ville / Localisation</label>
+                                <select id="location" name="Location">
+                                    <option value="Lagos" selected>Lagos</option>
+                                    <option value="Abuja">Abuja</option>
+                                    <option value="Port Harcourt">Port Harcourt</option>
+                                    <option value="Kano">Kano</option>
+                                    <option value="Ibadan">Ibadan</option>
+                                    <option value="Benin City">Benin City</option>
+                                    <option value="Kaduna">Kaduna</option>
+                                    <option value="Enugu">Enugu</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="deviceType">Type d'appareil</label>
+                                <select id="deviceType" name="Device_Type">
+                                    <option value="Android" selected>Android Phone</option>
+                                    <option value="iOS">Apple iPhone (iOS)</option>
+                                    <option value="Web Browser">Navigateur Web</option>
+                                    <option value="POS Terminal">Terminal POS</option>
+                                    <option value="ATM Terminal">Terminal ATM</option>
+                                    <option value="Unknown">Inconnu (Unknown)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="intlTx">Transaction Internationale</label>
+                                <select id="intlTx" name="International_Transaction">
+                                    <option value="No" selected>Non (Locale)</option>
+                                    <option value="Yes">Oui (Internationale)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="txStatus">Statut Transaction</label>
+                                <select id="txStatus" name="Transaction_Status">
+                                    <option value="Successful" selected>Réussie (Successful)</option>
+                                    <option value="Pending">En attente (Pending)</option>
+                                    <option value="Failed">Échouée (Failed)</option>
+                                    <option value="Reversed">Annulée (Reversed)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field full-width">
+                                <label for="txDateTime">Horodatage Transaction</label>
+                                <input type="text" id="txDateTime" name="Transaction_DateTime" value="2026-10-08 14:30:00" placeholder="YYYY-MM-DD HH:MM:SS">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section: Customer Profile Details -->
+                    <div class="form-group-card">
+                        <div class="card-subtitle-row">
+                            <h3 class="card-subtitle">2. Profil Client (FinTrust Store)</h3>
+                            <span class="badge badge-info">Auto-alignement</span>
+                        </div>
+                        <div class="input-grid">
+                            <div class="form-field">
+                                <label for="custName">Nom Client</label>
+                                <input type="text" id="custName" name="Customer_Name" value="Amara Okafor">
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custAge">Âge</label>
+                                <input type="number" id="custAge" name="Age" min="18" max="100" value="31">
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custGender">Genre</label>
+                                <select id="custGender" name="Gender">
+                                    <option value="Female" selected>Femme (Female)</option>
+                                    <option value="Male">Homme (Male)</option>
+                                    <option value="Prefer not to say">Non précisé</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custCity">Ville de Résidence</label>
+                                <select id="custCity" name="City">
+                                    <option value="Lagos" selected>Lagos</option>
+                                    <option value="Abuja">Abuja</option>
+                                    <option value="Port Harcourt">Port Harcourt</option>
+                                    <option value="Kano">Kano</option>
+                                    <option value="Ibadan">Ibadan</option>
+                                    <option value="Benin City">Benin City</option>
+                                    <option value="Kaduna">Kaduna</option>
+                                    <option value="Enugu">Enugu</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custSegment">Segment Client</label>
+                                <select id="custSegment" name="Customer_Segment">
+                                    <option value="Premium">Premium</option>
+                                    <option value="Everyday" selected>Everyday</option>
+                                    <option value="SME">SME (Entreprise)</option>
+                                    <option value="Student">Student (Étudiant)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custAccountType">Type de Compte</label>
+                                <select id="custAccountType" name="Account_Type">
+                                    <option value="Savings" selected>Épargne (Savings)</option>
+                                    <option value="Current">Courant (Current)</option>
+                                    <option value="Premium">Premium</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custTenure">Ancienneté (mois)</label>
+                                <input type="number" id="custTenure" name="Tenure_Months" min="0" value="18">
+                            </div>
+
+                            <div class="form-field">
+                                <label for="custIncome">Tranche de Revenus</label>
+                                <select id="custIncome" name="Monthly_Income_Band">
+                                    <option value="Below 100k">Moins de 100k</option>
+                                    <option value="100k-249k" selected>100k - 249k</option>
+                                    <option value="250k-499k">250k - 499k</option>
+                                    <option value="500k-999k">500k - 999k</option>
+                                    <option value="1m+">1 Million et plus</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field full-width">
+                                <label for="digitalEngagement">Score d'Engagement Digital : <span id="engagementValue" class="slider-val">3.8</span>/5.0</label>
+                                <input type="range" id="digitalEngagement" name="Digital_Engagement_Score" min="0" max="5" step="0.1" value="3.8" oninput="document.getElementById('engagementValue').textContent = this.value">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Submit Action Button -->
+                    <div class="form-action-area">
+                        <button type="submit" id="submitBtn" class="primary-btn">
+                            <span class="btn-icon">⚡</span>
+                            <span id="submitBtnText">Évaluer le Risque de la Transaction</span>
+                            <span class="btn-shortcut">Ctrl + Entrée</span>
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- Right: Prediction Result & Analytics Dashboard -->
+            <section class="panel result-panel">
+                <div class="panel-header">
+                    <div class="panel-title-wrapper">
+                        <div class="panel-icon result-icon">🛡️</div>
+                        <h2>Résultat de l'Évaluation</h2>
+                    </div>
+                    <span id="latencyBadge" class="badge badge-latency">Prêt</span>
+                </div>
+
+                <!-- Main Scoring Card -->
+                <div id="resultCard" class="result-card state-empty">
+                    <div class="result-card-inner">
+                        <div class="empty-state-content" id="emptyState">
+                            <div class="empty-radar">
+                                <div class="pulse-ring"></div>
+                                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                </svg>
+                            </div>
+                            <h3>En attente d'évaluation</h3>
+                            <p>Remplissez le formulaire à gauche ou choisissez un scénario rapide pour lancer la détection en temps réel.</p>
+                        </div>
+
+                        <!-- Active Result View (Hidden initially) -->
+                        <div class="active-result-content" id="activeResult" style="display: none;">
+                            <div class="decision-header">
+                                <div class="decision-badge-container">
+                                    <span class="decision-kicker">Décision ML Engineering</span>
+                                    <div id="decisionBadge" class="decision-badge">
+                                        <!-- Injected via JS -->
+                                    </div>
+                                    <p id="decisionExplanation" class="decision-desc"></p>
+                                </div>
+                            </div>
+
+                            <!-- Confidence Meter -->
+                            <div class="meter-container">
+                                <div class="meter-header">
+                                    <span class="meter-label">Probabilité de Risque (Confiance)</span>
+                                    <span id="confidencePercent" class="meter-value">0%</span>
+                                </div>
+                                <div class="meter-track">
+                                    <div id="meterFill" class="meter-fill" style="width: 0%;"></div>
+                                </div>
+                                <div class="meter-threshold-legend">
+                                    <span>0% (Sûr)</span>
+                                    <span class="threshold-marker">Seuil Décision : 50%</span>
+                                    <span>100% (Alerte)</span>
+                                </div>
+                            </div>
+
+                            <!-- Audit Metadata Grid -->
+                            <div class="audit-grid">
+                                <div class="audit-item">
+                                    <span class="audit-label">ID Transaction</span>
+                                    <span id="auditTxId" class="audit-val mono">-</span>
+                                </div>
+                                <div class="audit-item">
+                                    <span class="audit-label">Modèle Actif</span>
+                                    <span id="auditModel" class="audit-val">-</span>
+                                </div>
+                                <div class="audit-item">
+                                    <span class="audit-label">Temps de Réponse</span>
+                                    <span id="auditLatency" class="audit-val">-</span>
+                                </div>
+                                <div class="audit-item">
+                                    <span class="audit-label">Horodatage Audit</span>
+                                    <span id="auditTimestamp" class="audit-val mono text-xs">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Request/Response Inspector -->
+                <div class="inspector-card">
+                    <div class="inspector-tabs">
+                        <button type="button" class="tab-btn active" data-tab="jsonTab">JSON Réponse</button>
+                        <button type="button" class="tab-btn" data-tab="curlTab">Commande cURL</button>
+                    </div>
+                    <div class="tab-content" id="jsonTab">
+                        <pre><code id="jsonViewer">// Les données JSON de la réponse apparaîtront ici après évaluation</code></pre>
+                    </div>
+                    <div class="tab-content" id="curlTab" style="display: none;">
+                        <pre><code id="curlViewer">curl -X POST "http://localhost:8000/predict" ...</code></pre>
+                    </div>
+                </div>
+
+                <!-- Session History Table -->
+                <div class="history-card">
+                    <div class="history-header">
+                        <h3>Historique de la Session</h3>
+                        <button type="button" id="clearHistoryBtn" class="clear-btn">Effacer</button>
+                    </div>
+                    <div class="history-table-container">
+                        <table class="history-table" id="historyTable">
+                            <thead>
+                                <tr>
+                                    <th>Transaction</th>
+                                    <th>Montant</th>
+                                    <th>Décision</th>
+                                    <th>Confiance</th>
+                                    <th>Heure</th>
+                                </tr>
+                            </thead>
+                            <tbody id="historyBody">
+                                <tr>
+                                    <td colspan="5" class="empty-row">Aucune prédiction enregistrée pour cette session.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <p>FinTrust Digital Bank MLE Platform • Architecture Pipeline Machine Learning • Développé avec FastAPI & Vanilla JS</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

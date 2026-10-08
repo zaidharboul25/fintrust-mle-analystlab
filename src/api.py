@@ -23,7 +23,8 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from src.config import (
@@ -31,6 +32,7 @@ from src.config import (
     DEFAULT_MODEL_ARTIFACT_PATH,
     DEFAULT_MODEL_VERSION,
     PREPROCESSOR_ARTIFACT_PATH,
+    STATIC_DIR,
     VALID_CITIES,
 )
 from src.model_loader import ModelInterface, load_model
@@ -126,6 +128,7 @@ class RootResponse(BaseModel):
     milestone: str = "Week 4 — Test, Refine & Present"
     version: str = "1.0.0"
     endpoints: Dict[str, str] = {
+        "ui": "/ui",
         "health": "/health",
         "predict": "/predict",
         "documentation": "/docs",
@@ -206,6 +209,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 
 # =====================================================================
 # Global Exception Handlers
@@ -225,10 +231,25 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # API Endpoints
 # =====================================================================
 
-@app.get("/", response_model=RootResponse, summary="Root Service Information")
-async def root() -> RootResponse:
-    """Return basic project and service information, available endpoints, and responsible use notice."""
+@app.get("/", summary="Root Service Information", response_model=None)
+async def root(request: Request):
+    """Return web dashboard if accessed via browser, otherwise root JSON service overview."""
+    accept_header = request.headers.get("accept", "")
+    user_agent = request.headers.get("user-agent", "").lower()
+    index_path = STATIC_DIR / "index.html"
+    if "text/html" in accept_header and "testclient" not in user_agent and index_path.exists():
+        return FileResponse(index_path)
     return RootResponse()
+
+
+@app.get("/ui", include_in_schema=False)
+@app.get("/dashboard", include_in_schema=False)
+async def dashboard():
+    """Direct URL to the FinTrust frontend user interface."""
+    index_path = STATIC_DIR / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Frontend static files not found.")
 
 
 @app.get("/health", response_model=HealthResponse, summary="Service Health Check")
